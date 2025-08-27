@@ -24,6 +24,7 @@ type User struct {
 	LastName  string    `json:"last_name"`
 	Phone     string    `json:"phone"`
 	Birthday  time.Time `json:"birthday"`
+	Points    int       `gorm:"default:0" json:"points"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -84,11 +85,12 @@ func main() {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to hash"})
 		}
 		bday, _ := time.Parse("2006-01-02", body.Birthday)
-		user := User{Email: body.Email, Password: hashed, FirstName: body.FirstName, LastName: body.LastName, Phone: body.Phone, Birthday: bday}
+		// give new users some starter points
+		user := User{Email: body.Email, Password: hashed, FirstName: body.FirstName, LastName: body.LastName, Phone: body.Phone, Birthday: bday, Points: 100}
 		if err := db.Create(&user).Error; err != nil {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
 		}
-		return c.JSON(fiber.Map{"id": user.ID, "email": user.Email})
+		return c.JSON(fiber.Map{"id": user.ID, "email": user.Email, "points": user.Points})
 	})
 
 	app.Post("/login", func(c *fiber.Ctx) error {
@@ -129,6 +131,55 @@ func main() {
 		}
 		user.Password = ""
 		return c.JSON(user)
+	})
+
+	// Transfer points from authenticated user to another user
+	app.Post("/transfer", func(c *fiber.Ctx) error {
+		// get sender from token
+		userToken := c.Locals("user").(*jwt.Token)
+		claims := userToken.Claims.(jwt.MapClaims)
+		senderID := uint(claims["sub"].(float64))
+
+		var body struct {
+			ToEmail string `json:"to_email"`
+			Amount  int    `json:"amount"`
+		}
+		if err := c.BodyParser(&body); err != nil {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": err.Error()})
+		}
+		if body.Amount <= 0 {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "amount must be > 0"})
+		}
+
+		err := db.Transaction(func(tx *gorm.DB) error {
+			var sender User
+			if err := tx.Clauses().First(&sender, senderID).Error; err != nil {
+				return err
+			}
+			if sender.Points < body.Amount {
+				return fiber.NewError(fiber.StatusBadRequest, "insufficient points")
+			}
+			var receiver User
+			if err := tx.Where("email = ?", body.ToEmail).First(&receiver).Error; err != nil {
+				return err
+			}
+			sender.Points -= body.Amount
+			receiver.Points += body.Amount
+			if err := tx.Save(&sender).Error; err != nil {
+				return err
+			}
+			if err := tx.Save(&receiver).Error; err != nil {
+				return err
+			}
+			return nil
+		})
+		if err != nil {
+			if e, ok := err.(*fiber.Error); ok {
+				return c.Status(e.Code).JSON(fiber.Map{"error": e.Message})
+			}
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": err.Error()})
+		}
+		return c.JSON(fiber.Map{"status": "ok"})
 	})
 
 	app.Listen(":3000")
