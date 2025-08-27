@@ -1,55 +1,50 @@
-# Architecture — C4 Summary for TEMP_BACKEND
+# Architecture — C4 Summary for TEMP_BACKEND (Mermaid C4)
 
-This document summarizes the architecture of the TEMP_BACKEND project using C4-style diagrams (PlantUML C4). The diagrams describe system context, containers, and components derived from the current codebase (`main.go`).
+This document summarizes the TEMP_BACKEND architecture using Mermaid's C4 syntax. It includes System Context, Container and Component views derived from the current codebase (`main.go`).
 
 Render instructions
 
-- These diagrams use the C4-PlantUML library. To render them:
-  - Use the PlantUML CLI with an internet connection (the diagrams include the C4-PlantUML includes), or
-  - Use an online PlantUML server/renderer that supports remote !include, or
-  - Download the C4-PlantUML set locally and update the `!include` paths.
+- Mermaid C4 diagrams can be rendered by tools that support Mermaid (VS Code Mermaid preview, GitHub markdown rendering for supported versions, or mermaid-cli).
+- Each diagram uses the C4 flavor keywords: C4Context, C4Container, C4Component.
 
 System Context (Level 1)
 
-```plantuml
-@startuml SystemContext
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4.puml
+```mermaid
+%%{init: {"securityLevel": "loose"}}%%
+C4Context
+title TEMP_BACKEND - System Context
 
-Person(user, "End user", "Uses web UI or API clients")
+Person(user, "End user", "Uses API or web UI")
 System_Boundary(s_temp, "TEMP_BACKEND") {
-  Container(web_ui, "Web UI (optional)", "React (Vite)", "Browser-based front-end (not included in this repo)")
-  Container(api, "API Server", "Go + Fiber", "Provides REST API: /register, /login, /me, /transfer")
-  ContainerDb(db, "SQLite DB (temp_backend.db)", "SQLite", "Persists users and points")
+  System(api, "API Server", "Go + Fiber", "Provides REST endpoints: /register, /login, /me, /transfer")
+  ContainerDb(db, "SQLite (temp_backend.db)", "SQLite", "Persists users and points")
+  System_Ext(swagger, "Swagger UI / OpenAPI", "Docs", "Optional API docs viewer served from ./docs")
 }
 
-Rel(user, web_ui, "Uses")
 Rel(user, api, "Calls API (Bearer token) or via Web UI")
-Rel(web_ui, api, "Calls REST API")
 Rel(api, db, "Reads/Writes using GORM")
-
-@enduml
+Rel(api, swagger, "Serves OpenAPI JSON and static docs")
 ```
 
-Container (Level 2) — API Server decomposition
+Container (Level 2)
 
-```plantuml
-@startuml Containers
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml
-!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4.puml
+```mermaid
+%%{init: {"securityLevel": "loose"}}%%
+C4Container
+title API Server - Containers
 
-Person(user, "End user", "Authenticated user with JWT")
-System_Ext(swagger, "Swagger UI / OpenAPI", "Docs", "Optional API documentation viewer served from ./docs")
+Person(user, "End user", "Authenticated user")
+System_Ext(swagger, "Swagger UI / OpenAPI", "Docs")
 
 Container(api, "API Server", "Go + Fiber", "Implements auth and points transfer")
-ContainerDb(db, "SQLite DB (temp_backend.db)", "SQLite", "Stores users and points")
+Container_Db(db, "SQLite DB (temp_backend.db)", "SQLite", "Stores users and points")
 
-Container_Boundary(apiBoundary, api, "API Server") {
-  Component(authHandler, "Auth Handler", "handles /register and /login", "Hashes passwords, creates users, issues JWTs")
-  Component(userHandler, "User Handler", "handles /me", "Returns current user data")
-  Component(transferHandler, "Transfer Handler", "handles /transfer", "Performs transactional points transfer using GORM transaction")
+Boundary(apiBoundary, api, "API Server") {
+  Component(authHandler, "Auth Handler", "Handles /register and /login", "Hashes passwords, creates users, issues JWTs")
+  Component(userHandler, "User Handler", "Handles /me", "Returns current user data")
+  Component(transferHandler, "Transfer Handler", "Handles /transfer", "Performs transactional points transfer using GORM transaction")
   Component(tokenService, "Token Service", "JWT generation/validation", "Creates signed JWTs using secret")
-  Component(repo, "Repository / DB Layer", "GORM + SQLite", "Data persistence and queries")
+  Component(repo, "Repository (GORM)", "GORM + SQLite", "Data persistence and queries")
 }
 
 Rel(user, api, "Uses REST API (Bearer token)")
@@ -58,37 +53,37 @@ Rel(api, swagger, "Serves OpenAPI JSON and static docs")
 Rel(authHandler, tokenService, "Generates JWTs")
 Rel(transferHandler, repo, "Reads/Writes users within transaction")
 Rel(userHandler, repo, "Reads user record")
-
-@enduml
 ```
 
-Component (Level 3) — Key components and responsibilities
+Component (Level 3)
 
-- Auth Handler
-  - Parses /register and /login requests
-  - Hashes passwords using bcrypt
-  - Creates User records via GORM
-  - Calls Token Service to produce JWT
-- Token Service
-  - Produces HS256 JWTs with `sub` claim set to user ID
-  - Token lifetime: 72 hours (in code)
-  - Uses `jwtSecret` variable (move to env var for production)
-- Transfer Handler
-  - Parses transfer requests
-  - Validates amount and recipient existence
-  - Uses GORM Transaction to debit/credit user points atomically
-- Repository / DB Layer
-  - Single `users` table (GORM auto-migrate)
-  - Fields: id, email, password, first_name, last_name, phone, birthday, points, created_at
+```mermaid
+%%{init: {"securityLevel": "loose"}}%%
+C4Component
+title API Server - Key Components
+
+Container(api, "API Server", "Go + Fiber")
+
+Component(authHandler, "Auth Handler", "/register, /login")
+Component(tokenService, "Token Service", "JWT generation")
+Component(userHandler, "User Handler", "GET /me")
+Component(transferHandler, "Transfer Handler", "POST /transfer")
+Component(repo, "Repository / DB Layer", "GORM + SQLite")
+
+Rel(authHandler, repo, "Creates user records")
+Rel(authHandler, tokenService, "Requests JWT for user")
+Rel(userHandler, repo, "Reads user data")
+Rel(transferHandler, repo, "Performs transactional updates to users.points")
+```
 
 Operational notes & recommendations
 
-- Move `jwtSecret` into environment variables and provide an example `.env` in the repo.
-- Add input validation (email formats, password rules) and better error responses.
-- For production, replace SQLite with a server DB (Postgres/MySQL) and add migrations.
-- Add tests for transfer concurrency to ensure transactional integrity under load.
+- Move `jwtSecret` into environment variables (for example use `JWT_SECRET`) and do not commit secrets.
+- Add input validation (email format, password strength) and explicit error responses.
+- Replace SQLite with a server-grade DB (Postgres/MySQL) for production and add versioned migrations.
+- Add tests for concurrent transfers to validate transactional integrity under load.
 
 References
 
+- Mermaid C4: https://mermaid.js.org/syntax/c4.html
 - C4 Model examples: https://c4model.com/diagrams/
-- C4-PlantUML: https://github.com/plantuml-stdlib/C4-PlantUML
