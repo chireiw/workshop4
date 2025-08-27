@@ -64,6 +64,9 @@ func main() {
 	app := fiber.New()
 	app.Use(logger.New())
 
+	// Serve Swagger UI from ./docs
+	app.Static("/swagger", "./docs")
+
 	app.Post("/register", func(c *fiber.Ctx) error {
 		var body struct {
 			Email     string `json:"email"`
